@@ -8,28 +8,82 @@
 //--------------------------------------
 
 BitfieldLeftToRight();
+BitfieldDisablePadding();
 
-typedef struct
-{
-    ubyte syncByte <hidden = true>;
-    if (syncByte != 0x47) {
-        Warning("Sync byte is not correct (got 0x%02x instead of 0x47).", syncByte);
-        return;
+typedef struct {
+    uint64 base : 33 <name = "Base", comment = "System time clock divided by 90000">;
+    uint reserved : 6 <hidden = true>;
+    uint extension : 9 <name = "Extension", comment = "Lowest nine bits from the system time clock at the moment of arrival of the last byte of the packet">;
+} PCR <name = "Program Clock Reference", size = 6, read = ReadPCR, write = WritePCR, comment = "periodically transmitted value of 42 bits which is used to properly demultiplex packets and to assure that audio matches video">;
+
+uint ReadPCR(PCR pcr) {
+    string s;
+    SPrintf(s, "%Lu", 300 * pcr.base + pcr.extension);
+    return s;
+}
+
+void WritePCR(PCR &pcr, string s) {
+    uint64 t;
+    SScanf(s, "%Lu", t);
+    pcr.base = t / 300;
+    pcr.extension = t % 300;
+}
+
+typedef struct {
+    ubyte length <hidden = true>;
+    ubyte discontinuity : 1 <name = "Discontinuity indicator", comment = "Current TS packet is in a discontinuity state with respect to either the continuity counter or the program clock reference">;
+    ubyte randomAccess : 1 <name = "Random access indicator", comment = "PES packet in this TS packet starts a video/audio sequence">;
+    ubyte priority : 1 <name = "Elementary stream priority indicator">;
+    ubyte hasPCR : 1 <name = "PCR flag", comment = "Contains PCR field">;
+    ubyte hasOPCR : 1 <name = "OPCR flag", comment = "Contains OPCR field">;
+    ubyte hasSplicingPoint : 1 <name = "Splicing point flag", comment = "Contains splice countdown field in adaptation field">;
+    ubyte hasTransportPrivateData : 1 <name = "Transport private data flag", comment = "Contains private data bytes in adaptation field">;
+    ubyte hasExtension : 1 <name = "Extension flag", comment = "Contains adaptation field extension">;
+
+    if (hasPCR) {
+        PCR pcr;
     }
 
-    ubyte transportError : 1 <name = "Transport Error", comment = "Set if bit error exists in packet">;
-    ubyte payloadStart : 1 <name = "Payload Start", comment = "For Payload = PES: payload starts with first byte of PES Packet; for Payload = PSI: payload contains a PSI start, first byte of payload is pointer">;
-    ubyte transportPriority : 1 <name = "Transport Priority">;
-    ubyte pid : 5 <name = "PID", comment = "Packet Identifier describes stream number or type of data">;
-    ubyte tableType <name = "?", comment = "0 = Program Association Table; 1 = Conditional Access Table; 2-15 reserved">;
+    if (hasOPCR) {
+        PCR opcr <name = "Original Program Clock Reference">;
+    }
 
-    ubyte scramblingControl : 2 <name = "Scrambling Control", format = hex, comment = "00: not scrambled; others user-defined">;
-    ubyte adaptationFieldExists : 1 <name = "Adaptation Field Exists">;
-    ubyte payloadExists : 1 <name = "Payload Exists">;
-    ubyte contCounter : 4 <name = "Continuity Counter", comment = "Increments for payloads only">;
-    
-    ubyte data[0xBC - 4] <format = hex>;
+    byte spliceCountdown <name = "Splice countdown", comment = "Indicates how many TS packets from this one a slicing point occurs">;
+} AdaptationField <name = "Adaptation Field", size = GetAdaptationFieldSize>;
+
+int GetAdaptationFieldSize(AdaptationField &field) {
+    return ReadUByte(startof(field)) + 1;
 }
-TSPacket <size = 0xBC, optimize = true>;
 
-TSPacket tsPackets[FileSize() / 0xBC];
+typedef struct {
+    struct {
+        ubyte syncByte <hidden = true>;
+        if (syncByte != 0x47) {
+            Warning("Sync byte is not correct (got 0x%02x instead of 0x47).", syncByte);
+            return;
+        }
+    
+        ubyte transportError : 1 <name = "Transport error", comment = "Set if bit error exists in packet">;
+        ubyte payloadStart : 1 <name = "Payload start", comment = "Start of PES data or PSI otherwise zero only">;
+        ubyte transportPriority : 1 <name = "Transport priority", comment = "Higher priority than other packets with the same PID">;
+        uint pid : 13 <name = "Packet ID", comment = "Packet Identifier describes stream number or type of data">;
+    
+        ubyte scramblingControl : 2 <name = "Scrambling control", format = binary, comment = "00: not scrambled; others user-defined">;
+        ubyte hasAdaptationField : 1 <name = "Adaptation Field Exists", hidden = true>;
+        ubyte hasPayload : 1 <name = "Payload Exists", hidden = true>;
+        ubyte contCounter : 4 <name = "Continuity Counter", comment = "Increments for payloads only">;
+    } header <name = "Header">;
+        
+    if (header.hasAdaptationField) {
+        AdaptationField adaptationField;
+    }
+
+    if (header.hasPayload) {
+        ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex>;
+    }
+} TSPacket <name = "Transport Stream Packet", size = 188, optimize = true>;
+
+local int pos = FTell();
+while (ReadUByte(pos) != 0x47) pos++;
+FSeek(pos);
+TSPacket tsPackets[(FileSize() - pos) / 0xBC];
