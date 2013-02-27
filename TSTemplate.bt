@@ -7,8 +7,14 @@
 // Purpose:
 //--------------------------------------
 
+BigEndian();
 BitfieldLeftToRight();
 BitfieldDisablePadding();
+
+typedef enum <ubyte> {
+    no,
+    yes
+} bool;
 
 typedef struct {
     uint64 base : 33 <name = "Base", comment = "System time clock divided by 90000">;
@@ -40,14 +46,14 @@ int GetFieldSize(Field &field) {
 
 typedef struct {
     ubyte length <hidden = true>;
-    ubyte discontinuity : 1 <name = "Discontinuity indicator", comment = "Current TS packet is in a discontinuity state with respect to either the continuity counter or the program clock reference">;
-    ubyte randomAccess : 1 <name = "Random access indicator", comment = "PES packet in this TS packet starts a video/audio sequence">;
-    ubyte priority : 1 <name = "Elementary stream priority indicator">;
-    ubyte hasPCR : 1 <name = "PCR flag", comment = "Contains PCR field", hidden = true>;
-    ubyte hasOPCR : 1 <name = "OPCR flag", comment = "Contains OPCR field", hidden = true>;
-    ubyte hasSplicingPoint : 1 <name = "Splicing point flag", comment = "Contains splice countdown field in adaptation field", hidden = true>;
-    ubyte hasTransportPrivateData : 1 <name = "Transport private data flag", comment = "Contains private data bytes in adaptation field">;
-    ubyte hasExtension : 1 <name = "Extension flag", comment = "Contains adaptation field extension">;
+    bool discontinuity : 1 <name = "Discontinuity indicator", comment = "Current TS packet is in a discontinuity state with respect to either the continuity counter or the program clock reference">;
+    bool randomAccess : 1 <name = "Random access indicator", comment = "PES packet in this TS packet starts a video/audio sequence">;
+    bool priority : 1 <name = "Elementary stream priority indicator">;
+    bool hasPCR : 1 <name = "PCR flag", comment = "Contains PCR field", hidden = true>;
+    bool hasOPCR : 1 <name = "OPCR flag", comment = "Contains OPCR field", hidden = true>;
+    bool hasSplicingPoint : 1 <name = "Splicing point flag", comment = "Contains splice countdown field in adaptation field", hidden = true>;
+    bool hasTransportPrivateData : 1 <name = "Transport private data flag", comment = "Contains private data bytes in adaptation field", hidden = true>;
+    bool hasExtension : 1 <name = "Extension flag", comment = "Contains adaptation field extension", hidden = true>;
 
     if (hasPCR) {
         PCR pcr;
@@ -75,6 +81,13 @@ int GetAdaptationFieldSize(AdaptationField &field) {
 }
 
 typedef struct {
+    ubyte prefix[3] <hidden = true>;
+    ubyte streamId <name = "Stream ID", format = hex, comment = "0xC0 - 0xDF = audio stream, 0xE0 - 0xEF = video stream, 0xFA = MPEG-4 Part 1 SL (Synchronization Layer) stream">;
+    uint16 length <hidden = false>;
+    // TODO: add other fields
+} PES <name = "Packetized Elementary Stream", comment = "Compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+
+typedef struct {
     struct {
         ubyte syncByte <hidden = true>;
         if (syncByte != 0x47) {
@@ -82,23 +95,29 @@ typedef struct {
             return;
         }
     
-        ubyte transportError : 1 <name = "Transport error", comment = "Set if bit error exists in packet">;
-        ubyte payloadStart : 1 <name = "Payload start", comment = "Start of PES data or PSI otherwise zero only">;
-        ubyte transportPriority : 1 <name = "Transport priority", comment = "Higher priority than other packets with the same PID">;
-        uint pid : 13 <name = "Packet ID", comment = "Packet Identifier describes stream number or type of data">;
+        bool transportError : 1 <name = "Transport error", comment = "Set if bit error exists in packet">;
+        bool payloadStart : 1 <name = "Payload start", comment = "Start of PES data or PSI otherwise zero only">;
+        bool transportPriority : 1 <name = "Transport priority", comment = "Higher priority than other packets with the same PID">;
+        uint pid : 13 <name = "Packet ID", comment = "Packet Identifier describes stream number or type of data; 0 = Program Association Table, 1 = Conditional Access Table, 0x1FFF = NULL packet">;
     
-        ubyte scramblingControl : 2 <name = "Scrambling control", format = binary, comment = "00: not scrambled; others user-defined">;
-        ubyte hasAdaptationField : 1 <name = "Adaptation Field Exists", hidden = true>;
-        ubyte hasPayload : 1 <name = "Payload Exists", hidden = true>;
+        enum <ubyte> {not_scrambled} scramblingControl : 2 <name = "Scrambling control">;
+        bool hasAdaptationField : 1 <name = "Adaptation Field Exists", hidden = true>;
+        bool hasPayload : 1 <name = "Payload Exists", hidden = true>;
         ubyte contCounter : 4 <name = "Continuity Counter", comment = "Increments for payloads only">;
-    } header <name = "Header">;
+    } header <name = "Header", size = 4>;
         
     if (header.hasAdaptationField) {
         AdaptationField adaptationField;
     }
 
     if (header.hasPayload) {
-        ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex>;
+        local ubyte pesPrefix[3];
+        ReadBytes(pesPrefix, FTell(), 3);
+        if (pesPrefix[0] == 0x00 && pesPrefix[1] == 0x00 && pesPrefix[2] == 0x01) {
+            PES pes;
+        } else {
+            ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex, comment = "Not compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+        }
     }
 } TSPacket <name = "Transport Stream Packet", size = 188, optimize = true>;
 
