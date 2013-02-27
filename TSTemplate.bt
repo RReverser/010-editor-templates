@@ -31,12 +31,21 @@ void WritePCR(PCR &pcr, string s) {
 
 typedef struct {
     ubyte length <hidden = true>;
+    ubyte data[length] <name = "Data", format = hex>;
+} Field <size = GetFieldSize>;
+
+int GetFieldSize(Field &field) {
+    return ReadUByte(startof(field)) + 1;
+}
+
+typedef struct {
+    ubyte length <hidden = true>;
     ubyte discontinuity : 1 <name = "Discontinuity indicator", comment = "Current TS packet is in a discontinuity state with respect to either the continuity counter or the program clock reference">;
     ubyte randomAccess : 1 <name = "Random access indicator", comment = "PES packet in this TS packet starts a video/audio sequence">;
     ubyte priority : 1 <name = "Elementary stream priority indicator">;
-    ubyte hasPCR : 1 <name = "PCR flag", comment = "Contains PCR field">;
-    ubyte hasOPCR : 1 <name = "OPCR flag", comment = "Contains OPCR field">;
-    ubyte hasSplicingPoint : 1 <name = "Splicing point flag", comment = "Contains splice countdown field in adaptation field">;
+    ubyte hasPCR : 1 <name = "PCR flag", comment = "Contains PCR field", hidden = true>;
+    ubyte hasOPCR : 1 <name = "OPCR flag", comment = "Contains OPCR field", hidden = true>;
+    ubyte hasSplicingPoint : 1 <name = "Splicing point flag", comment = "Contains splice countdown field in adaptation field", hidden = true>;
     ubyte hasTransportPrivateData : 1 <name = "Transport private data flag", comment = "Contains private data bytes in adaptation field">;
     ubyte hasExtension : 1 <name = "Extension flag", comment = "Contains adaptation field extension">;
 
@@ -48,7 +57,17 @@ typedef struct {
         PCR opcr <name = "Original Program Clock Reference">;
     }
 
-    byte spliceCountdown <name = "Splice countdown", comment = "Indicates how many TS packets from this one a slicing point occurs">;
+    if (hasSplicingPoint) {
+        byte spliceCountdown <name = "Splice countdown", comment = "Indicates how many TS packets from this one a slicing point occurs">;
+    }
+
+    if (hasTransportPrivateData) {
+        Field privateData <name = "Private data">;
+    }
+
+    if (hasExtension) {
+        Field extension <name = "Extension">;
+    }
 } AdaptationField <name = "Adaptation Field", size = GetAdaptationFieldSize>;
 
 int GetAdaptationFieldSize(AdaptationField &field) {
