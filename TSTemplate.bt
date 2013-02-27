@@ -1,0 +1,35 @@
+//--------------------------------------
+//--- 010 Editor v4.0.3 Binary Template
+//
+// File:
+// Author:
+// Revision:
+// Purpose:
+//--------------------------------------
+
+BitfieldLeftToRight();
+
+typedef struct
+{
+    ubyte syncByte <hidden = true>;
+    if (syncByte != 0x47) {
+        Warning("Sync byte is not correct (got 0x%02x instead of 0x47).", syncByte);
+        return;
+    }
+
+    ubyte transportError : 1 <name = "Transport Error", comment = "Set if bit error exists in packet">;
+    ubyte payloadStart : 1 <name = "Payload Start", comment = "For Payload = PES: payload starts with first byte of PES Packet; for Payload = PSI: payload contains a PSI start, first byte of payload is pointer">;
+    ubyte transportPriority : 1 <name = "Transport Priority">;
+    ubyte pid : 5 <name = "PID", comment = "Packet Identifier describes stream number or type of data">;
+    ubyte tableType <name = "?", comment = "0 = Program Association Table; 1 = Conditional Access Table; 2-15 reserved">;
+
+    ubyte scramblingControl : 2 <name = "Scrambling Control", format = hex, comment = "00: not scrambled; others user-defined">;
+    ubyte adaptationFieldExists : 1 <name = "Adaptation Field Exists">;
+    ubyte payloadExists : 1 <name = "Payload Exists">;
+    ubyte contCounter : 4 <name = "Continuity Counter", comment = "Increments for payloads only">;
+    
+    ubyte data[0xBC - 4] <format = hex>;
+}
+TSPacket <size = 0xBC, optimize = true>;
+
+TSPacket tsPackets[FileSize() / 0xBC];
