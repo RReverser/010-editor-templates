@@ -104,22 +104,61 @@ typedef struct (TSHeader &tsHeader) {
         enum <ubyte> {no_pointer} pointerField <name = "Pointer Field", comment = "Number of bytes from the end of this field to the start of payload data">;
     }
 
-    enum <ubyte> {PAT, CAT, PMT} tableId <name = "Table ID">;
+    enum <ubyte> {PAT, CAT, PMT} tableId <name = "Table ID", format = hex>;
     bool isLongSection : 1 <name = "Section syntax indicator", hidden = true, comment = "Long-section format">;
     bool isPrivate : 1 <name = "Private indicator", hidden = true, comment = "No more used">;
     ubyte reserved : 2 <hidden = true>;
-    uint16 sectionLength <hidden = true>;
+    uint16 sectionLength : 12 <hidden = true>;
 
     if (!isLongSection) {
         ubyte data[sectionLength] <name = "Private data", format = hex>;
     } else {
-        uint16 tableIdExt <name = "Table ID Extension">;
+        uint16 tableIdExt <name = "Table ID Extension", format = hex>;
         ubyte reserved : 2 <hidden = true>;
         ubyte versionNumber : 5 <name = "Version number", comment = "Incremented by 1 mod 32 each time the table data changes">;
         bool currentNextIndicator : 1 <name = "Current Next indicator", comment = "If 1, this table is currently valid. If 0, this table will become valid next.">;
         ubyte sectionNumber <name = "Section number", comment = "Index of this section in the sequence of this table's sections">;
         ubyte lastSectionNumber <name = "Last section number", comment = "Index of last section of table">;
-        ubyte data[sectionLength - 9] <name = "Private data", format = hex>;
+        local uint16 dataLength = sectionLength - 9;
+
+        switch (tableId) {
+            case PAT:
+                struct {
+                    enum <uint16> {network_program} programNumber <name = "Program Number", format = hex>;
+                    ubyte reserved : 3 <hidden = true>;
+                    if (programNumber) {
+                        uint16 programMapPID : 13 <name = "PMT Packet ID", format = hex>;
+                    } else {
+                        uint16 networkPID : 13 <name = "NIT Packet ID", format = hex>;
+                    }
+                } tablePIDs[dataLength / 4] <name = "Table PIDs", size = 4, optimize = true>;
+                break;
+
+            case PMT:
+                ubyte reserved : 3 <hidden = true>;
+                uint16 pcr_pid : 13 <name = "PCR PID", comment = "PID of general timecode stream, or 0x1FFF">;
+                ubyte reserved : 4 <hidden = true>;
+                uint16 programInfoLength : 12 <hidden = true>;
+                ubyte programDescriptors[programInfoLength] <name = "Program descriptors", format = hex>;
+                dataLength -= 4 + programInfoLength;
+                while (dataLength > 0) {
+                    struct {
+                        ubyte streamType <name = "Stream type", format = hex>;
+                        ubyte reserved : 3 <hidden = true>;
+                        uint16 elementaryPID : 13 <name = "Elementary PID", format = hex>;
+                        ubyte reserved : 4 <hidden = true>;
+                        uint16 esInfoLength : 12 <hidden = true>;
+                        ubyte esInfo[esInfoLength] <name = "Elementary stream descriptors", format = hex>;
+                    } mappings <name = "Program mappings">;
+                    dataLength -= 5 + mappings.esInfoLength;
+                }
+                break;
+
+            default:
+                ubyte data[dataLength] <name = "Private data", format = hex>;
+                break;
+        }
+
         uint32 crc32 <name = "CRC32", format = hex>;
     }
 } TSPrivateSection <name = GetTSPSName>;
@@ -164,7 +203,7 @@ typedef struct {
             }
         }
     }
-} TSPacket <name = "Transport Stream Packet", size = 188, optimize = false>;
+} TSPacket <name = "Transport Stream Packets", size = 188, optimize = false>;
 
 TSPacket tsPackets[FileSize() / 188];
 
