@@ -19,9 +19,9 @@ typedef struct {
     uint64 base : 33 <name = "Base", comment = "System time clock divided by 90000">;
     ubyte reserved : 6 <hidden = true>;
     uint16 extension : 9 <name = "Extension", comment = "Lowest nine bits from the system time clock at the moment of arrival of the last byte of the packet">;
-} PCR <name = "Program Clock Reference", size = 6, read = ReadPCR, write = WritePCR, comment = "periodically transmitted value of 42 bits which is used to properly demultiplex packets and to assure that audio matches video">;
+} PCR <name = "Program Clock Reference", size = 6, read = ReadPCR, write = WritePCR, comment = "Periodically transmitted value of 42 bits which is used to properly demultiplex packets and to assure that audio matches video">;
 
-uint ReadPCR(PCR pcr) {
+string ReadPCR(PCR &pcr) {
     string s;
     SPrintf(s, "%Lu", 300 * (300 * pcr.base + pcr.extension));
     return s;
@@ -177,7 +177,7 @@ typedef struct {
     ubyte streamId <name = "Stream ID", format = hex, comment = "0xC0 - 0xDF = audio stream, 0xE0 - 0xEF = video stream, 0xFA = MPEG-4 Part 1 SL (Synchronization Layer) stream">;
     uint16 length <hidden = true>;
     // TODO: add other fields
-} PES <name = "Packetized Elementary Stream", size = GetPESSize, comment = "Compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+} PES <name = "Packetized Elementary Stream", size = GetPESSize>;
 
 int GetPESSize(PES &pes) {
     return ReadUShort(startof(pes) + 4) + 6;
@@ -191,16 +191,21 @@ typedef struct {
     }
 
     if (header.hasPayload) {
-        if (header.pid == 0x0000) {
-            TSPrivateSection pat(header);
-        } else {
-            local ubyte pesPrefix[3];
-            ReadBytes(pesPrefix, FTell(), 3);
-            if (pesPrefix[0] == 0x00 && pesPrefix[1] == 0x00 && pesPrefix[2] == 0x01) {
-                PES pes;
-            } else {
-                ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex, comment = "Not compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
-            }
+        switch (header.pid) {
+            case 0x0000:
+            case 0x0001:
+                TSPrivateSection tsps(header);
+                break;
+
+            default:
+                local ubyte pesPrefix[3];
+                ReadBytes(pesPrefix, FTell(), 3);
+                if (pesPrefix[0] == 0x00 && pesPrefix[1] == 0x00 && pesPrefix[2] == 0x01) {
+                    PES pes;
+                } else {
+                    ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex, comment = "Not compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+                }
+                break;
         }
     }
 } TSPacket <name = "Transport Stream Packets", size = 188, optimize = false>;
