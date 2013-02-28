@@ -1,10 +1,10 @@
 //--------------------------------------
 //--- 010 Editor v4.0.3 Binary Template
 //
-// File: AVITemplate.bt
+// File: ISOBMFTemplate.bt
 // Author: @RReverser
 // Revision: 201302261710
-// Purpose: Parse ISO Base Media File Format files (QuickTime, JPEG2000, MPEG-4, etc.)
+// Purpose: Parse ISO Base Media File Format files (QuickTime, JPEG2000, MPEG-4, etc.).
 //--------------------------------------
 
 BigEndian();

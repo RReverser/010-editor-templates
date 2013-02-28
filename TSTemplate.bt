@@ -1,10 +1,10 @@
 //--------------------------------------
 //--- 010 Editor v4.0.3 Binary Template
 //
-// File:
-// Author:
-// Revision:
-// Purpose:
+// File: TSTemplate.bt
+// Author: @RReverser
+// Revision: 201302281430
+// Purpose: Parse MPEG-TS (Transport Stream) files and records.
 //--------------------------------------
 
 BigEndian();
@@ -17,8 +17,8 @@ typedef enum <ubyte> {
 
 typedef struct {
     uint64 base : 33 <name = "Base", comment = "System time clock divided by 90000">;
-    uint reserved : 6 <hidden = true>;
-    uint extension : 9 <name = "Extension", comment = "Lowest nine bits from the system time clock at the moment of arrival of the last byte of the packet">;
+    ubyte reserved : 6 <hidden = true>;
+    uint16 extension : 9 <name = "Extension", comment = "Lowest nine bits from the system time clock at the moment of arrival of the last byte of the packet">;
 } PCR <name = "Program Clock Reference", size = 6, read = ReadPCR, write = WritePCR, comment = "periodically transmitted value of 42 bits which is used to properly demultiplex packets and to assure that audio matches video">;
 
 uint ReadPCR(PCR pcr) {
@@ -85,17 +85,6 @@ int GetAdaptationFieldSize(TSAdaptationField &field) {
 }
 
 typedef struct {
-    ubyte prefix[3] <hidden = true>;
-    ubyte streamId <name = "Stream ID", format = hex, comment = "0xC0 - 0xDF = audio stream, 0xE0 - 0xEF = video stream, 0xFA = MPEG-4 Part 1 SL (Synchronization Layer) stream">;
-    uint16 length <hidden = true>;
-    // TODO: add other fields
-} PES <name = "Packetized Elementary Stream", size = GetPESSize, comment = "Compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
-
-int GetPESSize(PES &pes) {
-    return ReadUShort(startof(pes) + 4) + 6;
-}
-
-typedef struct {
     ubyte syncByte <hidden = true>;
     Assert(syncByte == 0x47, "Lost stream synchronization byte.");
 
@@ -110,6 +99,51 @@ typedef struct {
     ubyte contCounter : 4 <name = "Continuity Counter", comment = "Increments for payloads only">;
 } TSHeader <name = "Header", size = 4>;
 
+typedef struct (TSHeader &tsHeader) {
+    if (tsHeader.payloadStart) {
+        enum <ubyte> {no_pointer} pointerField <name = "Pointer Field", comment = "Number of bytes from the end of this field to the start of payload data">;
+    }
+
+    enum <ubyte> {PAT, CAT, PMT} tableId <name = "Table ID">;
+    bool isLongSection : 1 <name = "Section syntax indicator", hidden = true, comment = "Long-section format">;
+    bool isPrivate : 1 <name = "Private indicator", hidden = true, comment = "No more used">;
+    ubyte reserved : 2 <hidden = true>;
+    uint16 sectionLength <hidden = true>;
+
+    if (!isLongSection) {
+        ubyte data[sectionLength] <name = "Private data", format = hex>;
+    } else {
+        uint16 tableIdExt <name = "Table ID Extension">;
+        ubyte reserved : 2 <hidden = true>;
+        ubyte versionNumber : 5 <name = "Version number", comment = "Incremented by 1 mod 32 each time the table data changes">;
+        bool currentNextIndicator : 1 <name = "Current Next indicator", comment = "If 1, this table is currently valid. If 0, this table will become valid next.">;
+        ubyte sectionNumber <name = "Section number", comment = "Index of this section in the sequence of this table's sections">;
+        ubyte lastSectionNumber <name = "Last section number", comment = "Index of last section of table">;
+        ubyte data[sectionLength - 9] <name = "Private data", format = hex>;
+        uint32 crc32 <name = "CRC32", format = hex>;
+    }
+} TSPrivateSection <name = GetTSPSName>;
+
+string GetTSPSName(TSPrivateSection &tsps) {
+    switch (tsps.tableId) {
+        case PAT: return "Program Association Table";
+        case CAT: return "Conditional Access Table";
+        case PMT: return "Program Map Table";
+        default: return "Program-Specific Information";
+    }
+}
+
+typedef struct {
+    ubyte prefix[3] <hidden = true>;
+    ubyte streamId <name = "Stream ID", format = hex, comment = "0xC0 - 0xDF = audio stream, 0xE0 - 0xEF = video stream, 0xFA = MPEG-4 Part 1 SL (Synchronization Layer) stream">;
+    uint16 length <hidden = true>;
+    // TODO: add other fields
+} PES <name = "Packetized Elementary Stream", size = GetPESSize, comment = "Compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+
+int GetPESSize(PES &pes) {
+    return ReadUShort(startof(pes) + 4) + 6;
+}
+
 typedef struct {
     TSHeader header;
 
@@ -118,12 +152,16 @@ typedef struct {
     }
 
     if (header.hasPayload) {
-        local ubyte pesPrefix[3] <format = hex>;
-        ReadBytes(pesPrefix, FTell(), 3);
-        if (pesPrefix[0] == 0x00 && pesPrefix[1] == 0x00 && pesPrefix[2] == 0x01) {
-            PES pes;
+        if (header.pid == 0x0000) {
+            TSPrivateSection pat(header);
         } else {
-            ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex, comment = "Not compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+            local ubyte pesPrefix[3];
+            ReadBytes(pesPrefix, FTell(), 3);
+            if (pesPrefix[0] == 0x00 && pesPrefix[1] == 0x00 && pesPrefix[2] == 0x01) {
+                PES pes;
+            } else {
+                ubyte data[188 - (FTell() - startof(this))] <name = "Payload Data", format = hex, comment = "Not compliant with MPEG-2 Part 1 (Systems) (ISO/IEC 13818-1) and ITU-T H.222.0">;
+            }
         }
     }
 } TSPacket <name = "Transport Stream Packet", size = 188, optimize = false>;
